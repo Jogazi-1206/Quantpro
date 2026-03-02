@@ -7,6 +7,17 @@ import requests
 from datetime import datetime, timedelta
 
 # ==========================================
+# 🛡️ [핵심] 야후 차단 방지용 크롬 브라우저 신분증(Session) 생성
+# ==========================================
+yf_session = requests.Session()
+yf_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8"
+})
+# ==========================================
+
+# ==========================================
 # 💡 [New] 야후 차단 방지용 초고속 캐싱 함수 (10분 유지)
 # ==========================================
 @st.cache_data(ttl=600) 
@@ -22,7 +33,8 @@ def fetch_global_assets_cached():
     results = {}
     for name, ticker in assets_map.items():
         try:
-            t = yf.Ticker(ticker)
+            # 🚨 신분증(session) 제시!
+            t = yf.Ticker(ticker, session=yf_session)
             hist = t.history(period="5d")
             if len(hist) >= 2:
                 curr = float(hist['Close'].iloc[-1])
@@ -121,7 +133,8 @@ class DataLoader:
 
         # 2. 웹 다운로드 (파일이 없거나 삭제된 경우 실행됨)
         try:
-            stock = yf.Ticker(ticker)
+            # 🚨 신분증(session) 제시!
+            stock = yf.Ticker(ticker, session=yf_session)
             df = stock.history(period=period)
             
             # [검증] 다운로드 받은 데이터도 검증
@@ -144,7 +157,8 @@ class DataLoader:
     def get_realtime_info(self, ticker):
         """실시간 정보"""
         try:
-            stock = yf.Ticker(ticker)
+            # 🚨 신분증(session) 제시!
+            stock = yf.Ticker(ticker, session=yf_session)
             # fast_info가 가끔 실패하면 info로 대체 시도
             try:
                 current = stock.fast_info.last_price
@@ -173,7 +187,8 @@ class DataLoader:
     def get_company_basic_info(self, ticker):
         """기업 개요"""
         try:
-            stock = yf.Ticker(ticker)
+            # 🚨 신분증(session) 제시!
+            stock = yf.Ticker(ticker, session=yf_session)
             info = stock.info
             return {
                 "summary": info.get("longBusinessSummary", "정보 없음"),
@@ -187,7 +202,8 @@ class DataLoader:
 
     def get_sparkline_data(self, ticker, period="1mo"):
         try:
-            stock = yf.Ticker(ticker)
+            # 🚨 신분증(session) 제시!
+            stock = yf.Ticker(ticker, session=yf_session)
             hist = stock.history(period=period)
             if hist.empty: return []
             return hist['Close'].tolist()
@@ -196,7 +212,8 @@ class DataLoader:
 
     def get_market_index_data(self, period="2y"):
         try:
-            index = yf.Ticker("^GSPC")
+            # 🚨 신분증(session) 제시!
+            index = yf.Ticker("^GSPC", session=yf_session)
             hist = index.history(period=period)
             if hist.empty: return pd.Series()
             return hist['Close']
@@ -214,7 +231,8 @@ class DataLoader:
         data = []
         try:
             for name, ticker in sectors.items():
-                stock = yf.Ticker(ticker)
+                # 🚨 신분증(session) 제시!
+                stock = yf.Ticker(ticker, session=yf_session)
                 curr = stock.fast_info.last_price
                 prev = stock.fast_info.previous_close
                 if curr and prev:

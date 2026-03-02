@@ -3,12 +3,25 @@ import pandas as pd
 import numpy as np
 import os
 import json
+import requests
+
+# ==========================================
+# 🛡️ [핵심] 야후 차단 방지용 크롬 브라우저 신분증(Session) 생성
+# ==========================================
+yf_session = requests.Session()
+yf_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8"
+})
+# ==========================================
 
 class ValuationAnalyzer:
     def __init__(self, ticker):
         self.ticker = ticker
         try:
-            self.stock = yf.Ticker(ticker)
+            # 🚨 야후에 접속할 때 무조건 위에서 만든 신분증(session)을 제시!
+            self.stock = yf.Ticker(ticker, session=yf_session)
         except Exception:
             self.stock = None
         self.info = {}

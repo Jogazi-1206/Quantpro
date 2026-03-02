@@ -261,6 +261,15 @@ elif st.session_state.active_tab == 'Watchlist':
             
             val = ValuationAnalyzer(t)
             v_data = val.get_financial_data()
+            
+            # ==========================================
+            # 🚨 [핵심 방어선] 데이터 못 가져왔을 때 우아하게 멈추기
+            # ==========================================
+            if not v_data:
+                st.error("🚨 **야후 파이낸스 접속 제한 (Rate Limit)**\n\n클라우드 서버의 일시적인 트래픽 증가로 인해 야후에서 데이터 제공을 차단했습니다. 1~2분 뒤에 다시 시도해 주세요!")
+                st.stop() # 밑에 있는 점수 계산 로직 등을 아예 실행하지 않고 여기서 멈춤!
+            # ==========================================
+
             score, status, reasons = val.calculate_valuation_score(v_data)
             comp = val.get_sector_comparison(v_data)
             
