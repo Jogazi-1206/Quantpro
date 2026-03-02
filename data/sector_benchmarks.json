@@ -1,0 +1,62 @@
+{
+    "Default": {
+        "per": 20.0,
+        "peg": 1.5,
+        "name": "시장평균"
+    },
+    "Industrials": {
+        "per": 32.6,
+        "peg": 1.5,
+        "name": "Industrials"
+    },
+    "Healthcare": {
+        "per": 27.0,
+        "peg": 1.5,
+        "name": "Healthcare"
+    },
+    "Technology": {
+        "per": 31.6,
+        "peg": 1.5,
+        "name": "Technology"
+    },
+    "Utilities": {
+        "per": 22.4,
+        "peg": 1.5,
+        "name": "Utilities"
+    },
+    "Financial Services": {
+        "per": 15.9,
+        "peg": 1.5,
+        "name": "Financial Services"
+    },
+    "Basic Materials": {
+        "per": 24.2,
+        "peg": 1.5,
+        "name": "Basic Materials"
+    },
+    "Consumer Cyclical": {
+        "per": 26.7,
+        "peg": 1.5,
+        "name": "Consumer Cyclical"
+    },
+    "Communication Services": {
+        "per": 26.0,
+        "peg": 1.5,
+        "name": "Communication Services"
+    },
+    "Consumer Defensive": {
+        "per": 25.3,
+        "peg": 1.5,
+        "name": "Consumer Defensive"
+    },
+    "Real Estate": {
+        "per": 33.5,
+        "peg": 1.5,
+        "name": "Real Estate"
+    },
+    "Energy": {
+        "per": 21.8,
+        "peg": 1.5,
+        "name": "Energy"
+    }
+}

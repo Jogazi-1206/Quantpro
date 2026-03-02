@@ -1,0 +1,13 @@
+[theme]
+# 전체 테마를 다크 모드로 강제 고정
+base="dark"
+
+# 브랜드 컬러 (버튼 등의 기본 색상)
+primaryColor="#3182F6"
+
+# 배경색상 지정 (상단 하얀색 여백 완벽 제거)
+backgroundColor="#0b0e14"
+secondaryBackgroundColor="#1e293b"
+
+# 기본 텍스트 색상
+textColor="#ffffff"

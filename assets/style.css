@@ -1,0 +1,119 @@
+/* 1. 글로벌 테마 (index.html 기반) */
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
+
+:root {
+    --bg-dark: #0B0E11;
+    --bg-card: #15191E;
+    --border-color: #2A2E35;
+    --accent-blue: #3182F6;
+    --accent-green: #23C55E;
+    --accent-red: #F43F5E;
+    --text-main: #FFFFFF;
+    --text-sub: #9CA3AF;
+}
+
+.stApp {
+    background-color: var(--bg-dark) !important;
+    font-family: 'Pretendard', sans-serif;
+    color: var(--text-main);
+}
+
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 5rem !important;
+    max-width: 1400px !important;
+}
+
+/* 2. 사이드바 네비게이션 커스텀 */
+section[data-testid="stSidebar"] {
+    background-color: #0E1116 !important;
+    border-right: 1px solid var(--border-color);
+}
+
+div[data-testid="stSidebar"] .stButton > button {
+    background-color: transparent !important;
+    border: none !important;
+    color: var(--text-sub) !important;
+    text-align: left !important;
+    font-weight: 500 !important;
+    justify-content: flex-start !important;
+}
+
+div[data-testid="stSidebar"] .stButton > button:hover {
+    background-color: rgba(49, 130, 246, 0.1) !important;
+    color: var(--accent-blue) !important;
+}
+
+/* 3. [핵심 수정] 메인 화면 버튼 스타일 (토스 블루 스타일) */
+/* 흰색 막대로 보이는 문제를 해결하기 위해 배경색과 글자색을 강제 지정합니다 */
+.stButton > button {
+    background-color: #212329 !important; /* 기본: 어두운 카드색 */
+    color: #FFFFFF !important;             /* 글자: 흰색 */
+    border: 1px solid var(--border-color) !important;
+    border-radius: 12px !important;
+    padding: 0.5rem 1rem !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+    width: 100%;
+}
+
+.stButton > button:hover {
+    background-color: var(--accent-blue) !important; /* 호버 시: 토스 블루 */
+    border-color: var(--accent-blue) !important;
+    color: #FFFFFF !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(49, 130, 246, 0.3);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+}
+
+/* 4. Glassmorphism 카드 */
+.glass-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: transform 0.2s ease;
+}
+.glass-card:hover {
+    border-color: #3A414B;
+}
+
+/* 5. 섹터 프로그레스 바 */
+.progress-bg {
+    background-color: #2A2E35;
+    border-radius: 999px;
+    overflow: hidden;
+    height: 8px;
+    margin-top: 6px;
+}
+
+/* 6. 텍스트 및 유틸리티 */
+h1, h2, h3 { color: var(--text-main) !important; }
+.text-green { color: var(--accent-green); }
+.text-red { color: var(--accent-red); }
+.text-blue { color: var(--accent-blue); }
+.text-gray { color: var(--text-sub); }
+.font-mono { font-family: monospace; }
+
+/* 7. 메트릭 위젯 스타일 덮어쓰기 */
+div[data-testid="stMetric"] {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    padding: 15px;
+    border-radius: 12px;
+}
+div[data-testid="stMetricLabel"] { font-size: 0.8rem !important; color: var(--text-sub) !important; }
+div[data-testid="stMetricValue"] { font-size: 1.8rem !important; color: var(--text-main) !important; }
+
+/* 8. 텍스트 입력창 */
+.stTextInput input {
+    background-color: var(--bg-card) !important;
+    border: 1px solid var(--border-color) !important;
+    color: white !important;
+    border-radius: 12px !important;
+}

@@ -1,0 +1,15 @@
+streamlit
+yfinance
+pandas
+numpy
+matplotlib
+scikit-learn
+xgboost
+google-generativeai
+fpdf
+fredapi
+ta
+python-dotenv
+lxml
+google-genai
+plotly
