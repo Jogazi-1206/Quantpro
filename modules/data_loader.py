@@ -1,66 +1,61 @@
-import yfinance as yf
 import pandas as pd
 import os
 import ssl
 import streamlit as st
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# 환경변수 로드
+load_dotenv()
+FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+BASE_URL = "https://financialmodelingprep.com/api/v3"
+
+def fetch_fmp(endpoint, **kwargs):
+    """FMP API 공통 호출 함수"""
+    if not FMP_API_KEY:
+        return None
+        
+    url = f"{BASE_URL}/{endpoint}"
+    params = {"apikey": FMP_API_KEY}
+    params.update(kwargs)
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        print(f"⚠️ FMP API 에러 ({endpoint}): {e}")
+        return None
 
 # ==========================================
-# 🛡️ 야후 차단 우회용 강력한 신분증 & 재시도 로직
-# ==========================================
-yf_session = requests.Session()
-retry = Retry(total=3, backoff_factor=1, status_forcelist=[403, 404, 429, 500, 502, 503, 504])
-adapter = HTTPAdapter(max_retries=retry)
-yf_session.mount("http://", adapter)
-yf_session.mount("https://", adapter)
-yf_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-})
-
-# ☁️ 현재 코드가 Streamlit Cloud(배포 서버)에서 도는지 확인하는 변수
-IS_CLOUD = "STREAMLIT_RUNTIME" in os.environ
-# ==========================================
-
-# ==========================================
-# 💡 [New] 야후 차단 방지용 초고속 캐싱 함수 (10분 유지)
+# 💡 [New] FMP 기반 글로벌 지수 캐싱 함수 (10분 유지)
 # ==========================================
 @st.cache_data(ttl=600) 
 def fetch_global_assets_cached():
-    assets_map = {
-        "Nasdaq": "^IXIC",
-        "Dow Jones": "^DJI",
-        "Russell 2000": "^RUT",
-        "Bitcoin": "BTC-USD",
-        "Gold": "GC=F",
-        "WTI Oil": "CL=F"
+    # 지수 및 주요 자산 (FMP 심볼 형식)
+    tickers = "^IXIC,^DJI,^RUT,BTCUSD,GCUSD,CLUSD" 
+    data = fetch_fmp(f"quote/{tickers}")
+    if not data: return None
+
+    name_map = {
+        "^IXIC": "Nasdaq", "^DJI": "Dow Jones", "^RUT": "Russell 2000",
+        "BTCUSD": "Bitcoin", "GCUSD": "Gold", "CLUSD": "WTI Oil"
     }
+    
     results = {}
-    for name, ticker in assets_map.items():
-        try:
-            # 클라우드면 신분증 제시, 로컬이면 순정 사용!
-            if IS_CLOUD:
-                t = yf.Ticker(ticker, session=yf_session)
-            else:
-                t = yf.Ticker(ticker)
-                
-            hist = t.history(period="5d")
-            if len(hist) >= 2:
-                curr = float(hist['Close'].iloc[-1])
-                prev = float(hist['Close'].iloc[-2])
-                pct = ((curr - prev) / prev) * 100
-                results[name] = {'price': curr, 'change': pct}
-        except Exception:
-            continue # 에러 나면 앱 멈추지 말고 그냥 패스!
-            
-    return results if results else None
+    for item in data:
+        symbol = item.get("symbol")
+        if symbol in name_map:
+            results[name_map[symbol]] = {
+                'price': item.get("price", 0),
+                'change': item.get("changesPercentage", 0)
+            }
+    return results
 # ==========================================
 
 class DataLoader:
     def __init__(self):
-        # SSL 인증 오류 방지
+        # SSL 인증 오류 방지 (원종님 원본 로직)
         try:
             _create_unverified_https_context = ssl._create_unverified_context
         except AttributeError:
@@ -76,20 +71,16 @@ class DataLoader:
 
     def _validate_data(self, df):
         """
-        [내부 함수] 데이터가 정상인지 검증합니다.
+        [내부 함수] 데이터가 정상인지 검증합니다. (원종님 원본 로직 100% 복원)
         1. 비어있는지 확인
         2. 필수 컬럼('Close')이 있는지 확인
         """
         if df.empty:
             return False
         
-        # 컬럼명 대소문자 문제 방지 (첫 글자 대문자로 통일)
+        # 컬럼명 대소문자 문제 방지
         df.columns = [str(c).capitalize() for c in df.columns]
         
-        # 'Adj Close'가 있으면 'Close'로 우선 사용
-        if 'Adj close' in df.columns:
-            df['Close'] = df['Adj close']
-            
         if 'Close' not in df.columns:
             return False
             
@@ -100,176 +91,146 @@ class DataLoader:
         return True
 
     def get_sp500_tickers(self):
-        """위키피디아에서 S&P 500 종목 리스트 크롤링"""
+        """FMP API를 통한 S&P 500 종목 리스트 획득"""
         try:
-            url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36"
-            }
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            
-            tables = pd.read_html(response.text)
-            df = tables[0]
-            tickers = df['Symbol'].tolist()
-            tickers = [t.replace('.', '-') for t in tickers]
-            return tickers
+            data = fetch_fmp("sp500_constituent")
+            if data:
+                return [item['symbol'] for item in data]
+            raise Exception("API 반환 데이터 없음")
         except Exception as e:
             print(f"⚠️ S&P 500 리스트 로드 실패: {e}")
+            # 폴백(Fallback) 리스트
             return ["AAPL", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "BRK-B", "LLY", "AVGO"]
 
     def get_historical_prices(self, ticker, period="10y"):
         """
-        [핵심 수정] 데이터 로드 및 '자가 치유(Self-Healing)' 로직
+        [원본 복원] 데이터 로드 및 '자가 치유(Self-Healing)' 로직 포함
         """
         file_path = os.path.join(self.data_dir, f"{ticker}.parquet")
         
-        # 1. 로컬 파일 확인
+        # 1. 로컬 파일 확인 (자가 치유 로직 포함)
         if os.path.exists(file_path):
             try:
                 df = pd.read_parquet(file_path)
                 
-                # [검증] 파일이 있지만 내용이 쓰레기라면? -> 삭제!
+                # [검증] 파일이 있지만 내용이 불량하다면? -> 삭제!
                 if not self._validate_data(df):
                     print(f"⚠️ 손상된 파일 발견 및 삭제: {ticker}")
-                    os.remove(file_path) # 파일 삭제
+                    os.remove(file_path)
                 else:
-                    # 정상 파일이면 날짜 확인 (최신화)
+                    # 정상 파일이면 날짜 확인 (최근 3일 이내 데이터인지)
                     last_date = df.index[-1].date()
                     if last_date >= (datetime.now() - timedelta(days=3)).date():
                         return df
             except Exception:
-                # 읽기 에러나면 그냥 삭제
                 if os.path.exists(file_path): os.remove(file_path)
 
-        # 2. 웹 다운로드 (파일이 없거나 삭제된 경우 실행됨)
+        # 2. FMP API를 통한 다운로드 (파일이 없거나 삭제된 경우)
         try:
-            if IS_CLOUD:
-                stock = yf.Ticker(ticker, session=yf_session)
-            else:
-                stock = yf.Ticker(ticker)
-                
-            df = stock.history(period=period)
+            data = fetch_fmp(f"historical-price-full/{ticker}")
+            if data and 'historical' in data:
+                new_df = pd.DataFrame(data['historical'])
+                if not new_df.empty:
+                    new_df['Date'] = pd.to_datetime(new_df['date'])
+                    new_df.set_index('Date', inplace=True)
+                    new_df.sort_index(inplace=True)
+                    
+                    # 컬럼명 표준화 (원종님 형식)
+                    new_df.rename(columns={
+                        'open': 'Open', 'high': 'High', 'low': 'Low', 
+                        'close': 'Close', 'volume': 'Volume'
+                    }, inplace=True)
+                    
+                    if self._validate_data(new_df):
+                        # Timezone 제거 및 저장
+                        if new_df.index.tz is not None:
+                            new_df.index = new_df.index.tz_localize(None)
+                        new_df.to_parquet(file_path)
+                        return new_df
             
-            # [검증] 다운로드 받은 데이터도 검증
-            if self._validate_data(df):
-                # Timezone 제거 (Parquet 호환성)
-                if df.index.tz is not None:
-                    df.index = df.index.tz_localize(None)
-                
-                # 저장
-                df.to_parquet(file_path)
-                return df
-            else:
-                # 다운로드 했는데도 이상하면 빈 데이터프레임 반환
-                return pd.DataFrame()
+            return pd.DataFrame() # 실패 시 빈 데이터프레임
                 
         except Exception as e:
             print(f"❌ 데이터 다운로드 실패 ({ticker}): {e}")
             return pd.DataFrame()
 
     def get_realtime_info(self, ticker):
-        """실시간 정보"""
+        """FMP Quote API를 이용한 실시간 정보 획득"""
         try:
-            if IS_CLOUD:
-                stock = yf.Ticker(ticker, session=yf_session)
-            else:
-                stock = yf.Ticker(ticker)
-                
-            # fast_info가 가끔 실패하면 info로 대체 시도
-            try:
-                current = stock.fast_info.last_price
-                prev = stock.fast_info.previous_close
-            except:
-                info = stock.info
-                current = info.get('currentPrice') or info.get('regularMarketPrice')
-                prev = info.get('previousClose') or info.get('regularMarketPreviousClose')
-
-            if current is None: return None
-            
-            try: name = stock.info.get('longName', ticker)
-            except: name = ticker
-
-            change_pct = ((current - prev) / prev) * 100 if prev else 0
-
-            return {
-                "name": name,
-                "ticker": ticker,
-                "current_price": round(current, 2),
-                "change_percent": round(change_pct, 2)
-            }
+            data = fetch_fmp(f"quote/{ticker}")
+            if data and len(data) > 0:
+                info = data[0]
+                return {
+                    "name": info.get("name", ticker),
+                    "ticker": ticker,
+                    "current_price": round(info.get("price", 0), 2),
+                    "change_percent": round(info.get("changesPercentage", 0), 2)
+                }
+            return None
         except:
             return None
 
     def get_company_basic_info(self, ticker):
-        """기업 개요"""
+        """기업 개요 (FMP Profile API)"""
         try:
-            if IS_CLOUD:
-                stock = yf.Ticker(ticker, session=yf_session)
-            else:
-                stock = yf.Ticker(ticker)
-                
-            info = stock.info
-            return {
-                "summary": info.get("longBusinessSummary", "정보 없음"),
-                "sector": info.get("sector", "N/A"),
-                "market_cap": info.get("marketCap", 0),
-                "total_revenue": info.get("totalRevenue", 0),
-                "operating_margins": info.get("operatingMargins", 0)
-            }
+            data = fetch_fmp(f"profile/{ticker}")
+            if data and len(data) > 0:
+                info = data[0]
+                return {
+                    "summary": info.get("description", "정보 없음"),
+                    "sector": info.get("sector", "N/A"),
+                    "market_cap": info.get("mktCap", 0),
+                    "total_revenue": 0, # Valuation 모듈에서 상세 처리
+                    "operating_margins": 0 
+                }
+            return {}
         except:
             return {}
 
     def get_sparkline_data(self, ticker, period="1mo"):
+        """스파크라인용 최근 주가 리스트"""
         try:
-            if IS_CLOUD:
-                stock = yf.Ticker(ticker, session=yf_session)
-            else:
-                stock = yf.Ticker(ticker)
-                
-            hist = stock.history(period=period)
-            if hist.empty: return []
-            return hist['Close'].tolist()
+            data = fetch_fmp(f"historical-price-full/{ticker}", timeseries=30)
+            if data and 'historical' in data:
+                df = pd.DataFrame(data['historical'])
+                df.sort_values('date', inplace=True)
+                return df['close'].tolist()
+            return []
         except:
             return []
 
     def get_market_index_data(self, period="2y"):
+        """S&P 500 지수 데이터"""
         try:
-            if IS_CLOUD:
-                index = yf.Ticker("^GSPC", session=yf_session)
-            else:
-                index = yf.Ticker("^GSPC")
-                
-            hist = index.history(period=period)
-            if hist.empty: return pd.Series()
-            return hist['Close']
+            data = fetch_fmp("historical-price-full/^GSPC")
+            if data and 'historical' in data:
+                df = pd.DataFrame(data['historical'])
+                df['Date'] = pd.to_datetime(df['date'])
+                df.set_index('Date', inplace=True)
+                df.sort_index(inplace=True)
+                return df['close']
+            return pd.Series()
         except:
             return pd.Series()
 
     def get_sector_performance(self):
-        """섹터 ETF 현황 (11개)"""
-        sectors = {
-            "Technology": "XLK", "Healthcare": "XLV", "Financials": "XLF", 
-            "Energy": "XLE", "Discretionary": "XLY", "Staples": "XLP",       
-            "Industrials": "XLI", "Utilities": "XLU", "Materials": "XLB", 
-            "Real Estate": "XLRE", "Communication": "XLC"
-        }
-        data = []
+        """섹터별 성과 데이터 (FMP 전용 엔드포인트)"""
         try:
-            for name, ticker in sectors.items():
-                if IS_CLOUD:
-                    stock = yf.Ticker(ticker, session=yf_session)
-                else:
-                    stock = yf.Ticker(ticker)
-                    
-                curr = stock.fast_info.last_price
-                prev = stock.fast_info.previous_close
-                if curr and prev:
-                    change = ((curr - prev) / prev) * 100
-                    data.append({"name": name, "change": change})
-        except: pass
-        data.sort(key=lambda x: x['change'], reverse=True)
-        return data
+            data = fetch_fmp("sectors-performance")
+            results = []
+            if data:
+                for item in data:
+                    pct_str = str(item.get("changesPercentage", "0")).replace('%', '')
+                    try: pct = float(pct_str)
+                    except: pct = 0.0
+                    results.append({
+                        "name": item.get("sector", "Unknown"),
+                        "change": pct
+                    })
+                results.sort(key=lambda x: x['change'], reverse=True)
+            return results
+        except:
+            return []
 
     def get_dashboard_assets(self):
         return fetch_global_assets_cached()

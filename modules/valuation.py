@@ -1,46 +1,30 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import os
 import json
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from dotenv import load_dotenv
 
-# ==========================================
-# 🛡️ 야후 차단 우회용 강력한 신분증 & 재시도 로직
-# ==========================================
-yf_session = requests.Session()
-retry = Retry(total=3, backoff_factor=1, status_forcelist=[403, 404, 429, 500, 502, 503, 504])
-adapter = HTTPAdapter(max_retries=retry)
-yf_session.mount("http://", adapter)
-yf_session.mount("https://", adapter)
-yf_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-})
+load_dotenv()
+FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+BASE_URL = "https://financialmodelingprep.com/api/v3"
 
-# ☁️ 현재 코드가 Streamlit Cloud(배포 서버)에서 도는지 확인하는 변수
-IS_CLOUD = "STREAMLIT_RUNTIME" in os.environ
-# ==========================================
+def fetch_fmp(endpoint):
+    if not FMP_API_KEY: return None
+    url = f"{BASE_URL}/{endpoint}?apikey={FMP_API_KEY}"
+    try:
+        res = requests.get(url, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except:
+        return None
 
 class ValuationAnalyzer:
     def __init__(self, ticker):
         self.ticker = ticker
-        try:
-            # 클라우드면 신분증 제시, 로컬이면 순정 사용!
-            if IS_CLOUD:
-                self.stock = yf.Ticker(ticker, session=yf_session)
-            else:
-                self.stock = yf.Ticker(ticker)
-        except Exception:
-            self.stock = None
-        self.info = {}
-        
-        # [New] 동적 벤치마크 로드
         self.benchmarks = self.load_sector_benchmarks()
 
     def load_sector_benchmarks(self):
-        """저장된 섹터별 벤치마크(JSON)를 로드하거나 기본값을 사용"""
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_path = os.path.join(base_dir, "data", "sector_benchmarks.json")
         
@@ -58,73 +42,75 @@ class ValuationAnalyzer:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except:
-                pass
+            except: pass
         return defaults
         
     def get_financial_data(self):
         try:
-            if not self.stock: return None
-            self.info = self.stock.info
-            
-            current_price = self.info.get("currentPrice", self.info.get("regularMarketPreviousClose", 0))
-            per = self.info.get("trailingPE", 0)
-            fwd_per = self.info.get("forwardPE", 0)
-            eps = self.info.get("trailingEps", 0)         
-            book_value = self.info.get("bookValue", 0)    
-            
-            earnings_growth = self.info.get("earningsGrowth", 0) 
-            peg = self.info.get("pegRatio", None)
-            peg_source = "API"
-            
-            if (peg is None or peg <= 0) and fwd_per > 0 and earnings_growth > 0:
-                try:
-                    peg = round(fwd_per / (earnings_growth * 100), 2)
-                    peg_source = "Manual Calc"
-                except: peg = 0
-            if peg is None: peg = 0
+            # FMP API의 핵심 재무 지표 엔드포인트 3개 호출 (초고속 병렬 호출도 가능하지만 일단 순차적 안정성 확보)
+            quote = fetch_fmp(f"quote/{self.ticker}")
+            metrics = fetch_fmp(f"key-metrics-ttm/{self.ticker}")
+            ratios = fetch_fmp(f"ratios-ttm/{self.ticker}")
+            profile = fetch_fmp(f"profile/{self.ticker}")
 
-            debt_to_equity = self.info.get("debtToEquity", 0)
-            free_cashflow = self.info.get("freeCashflow", 0)
-            operating_margins = self.info.get("operatingMargins", 0)
-            pbr = self.info.get("priceToBook", 0)
-            roe = self.info.get("returnOnEquity", 0)
+            if not quote or len(quote) == 0: return None
+            
+            q_data = quote[0]
+            m_data = metrics[0] if metrics else {}
+            r_data = ratios[0] if ratios else {}
+            p_data = profile[0] if profile else {}
 
+            # 지표 추출 및 0 처리 방어
+            current_price = q_data.get("price", 0)
+            eps = q_data.get("eps", 0)
+            per = q_data.get("pe", 0)
+            if per == 0 and eps > 0: per = current_price / eps
+            
+            pbr = m_data.get("pbRatioTTM", 0)
+            roe = m_data.get("roeTTM", 0)
+            peg = r_data.get("pegRatioTTM", 0)
+            debt_to_equity = m_data.get("debtToEquityTTM", 0) * 100 # %로 변환
+            operating_margins = r_data.get("operatingProfitMarginTTM", 0)
+            free_cashflow = m_data.get("freeCashFlowPerShareTTM", 0) * p_data.get("mktCap", 1) # 근사치
+
+            book_value = current_price / pbr if pbr > 0 else 0
+            
             formulas = {
-                "PER (주가수익비율)": f"주가(${current_price}) ÷ EPS(${eps}) = {per:.2f}배",
-                "PEG (주가수익성장비율)": f"PER({per:.2f}) ÷ 이익성장률({(earnings_growth*100):.1f}%) = {peg}배",
-                "PBR (주가순자산비율)": f"주가(${current_price}) ÷ BPS(${book_value}) = {pbr:.2f}배",
+                "PER (주가수익비율)": f"주가(${current_price:.2f}) ÷ EPS(${eps:.2f}) = {per:.2f}배",
+                "PEG (주가수익성장비율)": f"FMP 공식 API TTM(Trailing 12 Months) 산출 = {peg:.2f}배",
+                "PBR (주가순자산비율)": f"주가(${current_price:.2f}) ÷ BPS(${book_value:.2f}) = {pbr:.2f}배",
                 "ROE (자기자본이익률)": f"최근 12개월 순이익 기준 = {(roe*100):.1f}%",
                 "부채비율 (Debt/Equity)": f"총부채 ÷ 자본총계 = {debt_to_equity:.1f}%",
                 "영업이익률 (Op. Margin)": f"영업이익 ÷ 총매출 = {(operating_margins*100):.1f}%"
             }
 
             data = {
-                "name": self.info.get("shortName", self.ticker),
-                "sector": self.info.get("sector", "Default"),
+                "name": q_data.get("name", self.ticker),
+                "sector": p_data.get("sector", "Default"),
                 "current_price": current_price,
-                "target_price": self.info.get("targetMeanPrice", 0),
-                "market_cap": self.info.get("marketCap", 0),
+                "target_price": q_data.get("priceAvg200", 0), # 200일선 대체
+                "market_cap": q_data.get("marketCap", 0),
                 "per": per,
-                "fwd_per": fwd_per,
-                "eps": eps, 
+                "fwd_per": per, # 무료 티어 방어
+                "eps": eps,
                 "pbr": pbr,
                 "roe": roe,
                 "peg": peg,
-                "peg_source": peg_source,
-                "revenue_growth": self.info.get("revenueGrowth", 0),
-                "earnings_growth": earnings_growth,
-                "ps_ratio": self.info.get("priceToSalesTrailing12Months", 0),
-                "ev_ebitda": self.info.get("enterpriseToEbitda", 0),
-                "52w_high": self.info.get("fiftyTwoWeekHigh", 0),
-                "52w_low": self.info.get("fiftyTwoWeekLow", 0),
+                "peg_source": "FMP API",
+                "revenue_growth": 0,
+                "earnings_growth": 0,
+                "ps_ratio": m_data.get("ptbRatioTTM", 0),
+                "ev_ebitda": m_data.get("enterpriseValueOverEBITDATTM", 0),
+                "52w_high": q_data.get("yearHigh", 0),
+                "52w_low": q_data.get("yearLow", 0),
                 "debt_to_equity": debt_to_equity,
                 "free_cashflow": free_cashflow,
                 "op_margin": operating_margins,
                 "formulas": formulas 
             }
             return data
-        except Exception:
+        except Exception as e:
+            print(f"Valuation API 에러: {e}")
             return None
 
     def calculate_valuation_score(self, data):
@@ -138,13 +124,13 @@ class ValuationAnalyzer:
         if peg > 0:
             if peg < 0.8:
                 score += 20
-                reasons.append(f"💎 초저평가 성장주 (PEG {peg})")
+                reasons.append(f"💎 초저평가 성장주 (PEG {peg:.2f})")
             elif peg < 1.2:
                 score += 10
-                reasons.append(f"✅ 합리적 가격 (PEG {peg})")
+                reasons.append(f"✅ 합리적 가격 (PEG {peg:.2f})")
             elif peg > 2.5:
                 score -= 10
-                reasons.append(f"⚠️ 고평가 구간 (PEG {peg})")
+                reasons.append(f"⚠️ 고평가 구간 (PEG {peg:.2f})")
 
         roe = data['roe']
         if roe > 0.20:
@@ -157,7 +143,7 @@ class ValuationAnalyzer:
         is_financial = "Financial" in data['sector']
         if not is_financial and de_ratio > 200:
             score -= 10
-            reasons.append(f"💸 부채 리스크 높음 ({de_ratio}%)")
+            reasons.append(f"💸 부채 리스크 높음 ({de_ratio:.1f}%)")
         
         opm = data['op_margin']
         if opm > 0.20:
