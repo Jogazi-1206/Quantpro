@@ -3,25 +3,13 @@ import pandas as pd
 import numpy as np
 import os
 import json
-import requests
-
-# ==========================================
-# 🛡️ [핵심] 야후 차단 방지용 크롬 브라우저 신분증(Session) 생성
-# ==========================================
-yf_session = requests.Session()
-yf_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8"
-})
-# ==========================================
 
 class ValuationAnalyzer:
     def __init__(self, ticker):
         self.ticker = ticker
         try:
-            # 🚨 야후에 접속할 때 무조건 위에서 만든 신분증(session)을 제시!
-            self.stock = yf.Ticker(ticker, session=yf_session)
+            # 🚨 가짜 신분증 빼고 순정으로 롤백!
+            self.stock = yf.Ticker(ticker)
         except Exception:
             self.stock = None
         self.info = {}
@@ -34,7 +22,6 @@ class ValuationAnalyzer:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_path = os.path.join(base_dir, "data", "sector_benchmarks.json")
         
-        # 기본값 (Fallback)
         defaults = {
             "Technology": {"per": 35.0, "peg": 1.5, "name": "기술주"},
             "Financial Services": {"per": 14.5, "peg": 1.0, "name": "금융"},
@@ -58,14 +45,12 @@ class ValuationAnalyzer:
             if not self.stock: return None
             self.info = self.stock.info
             
-            # 기본 데이터 및 원재료(Raw Data) 추출
             current_price = self.info.get("currentPrice", self.info.get("regularMarketPreviousClose", 0))
             per = self.info.get("trailingPE", 0)
             fwd_per = self.info.get("forwardPE", 0)
-            eps = self.info.get("trailingEps", 0)         # [New] 주당순이익
-            book_value = self.info.get("bookValue", 0)    # [New] 주당순자산
+            eps = self.info.get("trailingEps", 0)         
+            book_value = self.info.get("bookValue", 0)    
             
-            # PEG 계산
             earnings_growth = self.info.get("earningsGrowth", 0) 
             peg = self.info.get("pegRatio", None)
             peg_source = "API"
@@ -77,14 +62,12 @@ class ValuationAnalyzer:
                 except: peg = 0
             if peg is None: peg = 0
 
-            # 안정성 & 수익성 지표
             debt_to_equity = self.info.get("debtToEquity", 0)
             free_cashflow = self.info.get("freeCashflow", 0)
             operating_margins = self.info.get("operatingMargins", 0)
             pbr = self.info.get("priceToBook", 0)
             roe = self.info.get("returnOnEquity", 0)
 
-            # [핵심] 계산 근거(Lineage) 생성
             formulas = {
                 "PER (주가수익비율)": f"주가(${current_price}) ÷ EPS(${eps}) = {per:.2f}배",
                 "PEG (주가수익성장비율)": f"PER({per:.2f}) ÷ 이익성장률({(earnings_growth*100):.1f}%) = {peg}배",
@@ -102,7 +85,7 @@ class ValuationAnalyzer:
                 "market_cap": self.info.get("marketCap", 0),
                 "per": per,
                 "fwd_per": fwd_per,
-                "eps": eps, # [New]
+                "eps": eps, 
                 "pbr": pbr,
                 "roe": roe,
                 "peg": peg,
@@ -116,7 +99,7 @@ class ValuationAnalyzer:
                 "debt_to_equity": debt_to_equity,
                 "free_cashflow": free_cashflow,
                 "op_margin": operating_margins,
-                "formulas": formulas # [New] 딕셔너리 추가
+                "formulas": formulas 
             }
             return data
         except Exception:
@@ -129,7 +112,6 @@ class ValuationAnalyzer:
         score = 50 
         reasons = []
 
-        # 1. PEG Ratio
         peg = data['peg']
         if peg > 0:
             if peg < 0.8:
@@ -142,7 +124,6 @@ class ValuationAnalyzer:
                 score -= 10
                 reasons.append(f"⚠️ 고평가 구간 (PEG {peg})")
 
-        # 2. ROE
         roe = data['roe']
         if roe > 0.20:
             score += 10
@@ -150,7 +131,6 @@ class ValuationAnalyzer:
         elif roe < 0.05:
             score -= 5
 
-        # 3. 부채비율 & 수익성
         de_ratio = data['debt_to_equity']
         is_financial = "Financial" in data['sector']
         if not is_financial and de_ratio > 200:
@@ -162,9 +142,7 @@ class ValuationAnalyzer:
             score += 10
             reasons.append(f"💰 고마진 사업구조 (OPM {opm*100:.1f}%)")
 
-        # 4. 섹터 비교 평가 (동적 벤치마크 사용)
         sector_key = data.get('sector', 'Default')
-        # DB에 없는 섹터면 Default 사용
         benchmark = self.benchmarks.get(sector_key, self.benchmarks.get('Default'))
         
         my_per = data.get('per', 0)
