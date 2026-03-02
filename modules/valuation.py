@@ -3,13 +3,35 @@ import pandas as pd
 import numpy as np
 import os
 import json
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# ==========================================
+# 🛡️ 야후 차단 우회용 강력한 신분증 & 재시도 로직
+# ==========================================
+yf_session = requests.Session()
+retry = Retry(total=3, backoff_factor=1, status_forcelist=[403, 404, 429, 500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry)
+yf_session.mount("http://", adapter)
+yf_session.mount("https://", adapter)
+yf_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+})
+
+# ☁️ 현재 코드가 Streamlit Cloud(배포 서버)에서 도는지 확인하는 변수
+IS_CLOUD = "STREAMLIT_RUNTIME" in os.environ
+# ==========================================
 
 class ValuationAnalyzer:
     def __init__(self, ticker):
         self.ticker = ticker
         try:
-            # 🚨 가짜 신분증 빼고 순정으로 롤백!
-            self.stock = yf.Ticker(ticker)
+            # 클라우드면 신분증 제시, 로컬이면 순정 사용!
+            if IS_CLOUD:
+                self.stock = yf.Ticker(ticker, session=yf_session)
+            else:
+                self.stock = yf.Ticker(ticker)
         except Exception:
             self.stock = None
         self.info = {}
