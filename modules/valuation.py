@@ -1,30 +1,54 @@
+import yfinance as yf
 import pandas as pd
 import numpy as np
 import os
 import json
 import requests
-from dotenv import load_dotenv
+import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-load_dotenv()
-FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
-BASE_URL = "https://financialmodelingprep.com/api/v3"
+# ==========================================
+# 🛡️ 야후 차단 방지용 강력한 세션 및 위장 로직
+# ==========================================
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/122.0.0.0"
+]
 
-def fetch_fmp(endpoint):
-    if not FMP_API_KEY: return None
-    url = f"{BASE_URL}/{endpoint}?apikey={FMP_API_KEY}"
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except:
-        return None
+def get_yf_session():
+    """야후 접속을 위한 신분증 세션 생성"""
+    session = requests.Session()
+    retry = Retry(total=3, backoff_factor=1, status_forcelist=[403, 429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+    return session
+
+# 현재 서버가 클라우드 배포 환경인지 확인
+IS_CLOUD = "STREAMLIT_RUNTIME" in os.environ
+# ==========================================
 
 class ValuationAnalyzer:
     def __init__(self, ticker):
         self.ticker = ticker
+        try:
+            # 🚨 클라우드면 신분증 세션 사용, 로컬이면 순정 yfinance 사용
+            if IS_CLOUD:
+                self.session = get_yf_session()
+                self.stock = yf.Ticker(ticker, session=self.session)
+            else:
+                self.stock = yf.Ticker(ticker)
+        except Exception:
+            self.stock = None
+            
         self.benchmarks = self.load_sector_benchmarks()
 
     def load_sector_benchmarks(self):
+        """섹터별 벤치마크 로드 (원본 로직 유지)"""
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_path = os.path.join(base_dir, "data", "sector_benchmarks.json")
         
@@ -46,80 +70,74 @@ class ValuationAnalyzer:
         return defaults
         
     def get_financial_data(self):
+        """야후 파이낸스 info 기반 재무 데이터 분석 (복구 버전)"""
         try:
-            # FMP API의 핵심 재무 지표 엔드포인트 3개 호출 (초고속 병렬 호출도 가능하지만 일단 순차적 안정성 확보)
-            quote = fetch_fmp(f"quote/{self.ticker}")
-            metrics = fetch_fmp(f"key-metrics-ttm/{self.ticker}")
-            ratios = fetch_fmp(f"ratios-ttm/{self.ticker}")
-            profile = fetch_fmp(f"profile/{self.ticker}")
-
-            if not quote or len(quote) == 0: return None
+            if not self.stock: return None
             
-            q_data = quote[0]
-            m_data = metrics[0] if metrics else {}
-            r_data = ratios[0] if ratios else {}
-            p_data = profile[0] if profile else {}
-
+            # 🚨 야후 info 데이터 호출 (가장 많은 정보를 담고 있음)
+            info = self.stock.info
+            if not info: return None
+            
             # 지표 추출 및 0 처리 방어
-            current_price = q_data.get("price", 0)
-            eps = q_data.get("eps", 0)
-            per = q_data.get("pe", 0)
-            if per == 0 and eps > 0: per = current_price / eps
+            current_price = info.get("currentPrice", info.get("regularMarketPreviousClose", 0))
+            per = info.get("trailingPE", 0)
+            fwd_per = info.get("forwardPE", 0)
+            eps = info.get("trailingEps", 0)
+            book_value = info.get("bookValue", 0)
+            pbr = info.get("priceToBook", 0)
+            roe = info.get("returnOnEquity", 0)
+            peg = info.get("pegRatio", 0)
+            debt_to_equity = info.get("debtToEquity", 0)
+            operating_margins = info.get("operatingMargins", 0)
             
-            pbr = m_data.get("pbRatioTTM", 0)
-            roe = m_data.get("roeTTM", 0)
-            peg = r_data.get("pegRatioTTM", 0)
-            debt_to_equity = m_data.get("debtToEquityTTM", 0) * 100 # %로 변환
-            operating_margins = r_data.get("operatingProfitMarginTTM", 0)
-            free_cashflow = m_data.get("freeCashFlowPerShareTTM", 0) * p_data.get("mktCap", 1) # 근사치
-
-            book_value = current_price / pbr if pbr > 0 else 0
-            
+            # [복원] 원종님 핵심 로직 - 계산 근거(Lineage) 생성
             formulas = {
                 "PER (주가수익비율)": f"주가(${current_price:.2f}) ÷ EPS(${eps:.2f}) = {per:.2f}배",
-                "PEG (주가수익성장비율)": f"FMP 공식 API TTM(Trailing 12 Months) 산출 = {peg:.2f}배",
+                "PEG (주가수익성장비율)": f"야후 제공 (이익성장성 대비 멀티플) = {peg:.2f}배",
                 "PBR (주가순자산비율)": f"주가(${current_price:.2f}) ÷ BPS(${book_value:.2f}) = {pbr:.2f}배",
-                "ROE (자기자본이익률)": f"최근 12개월 순이익 기준 = {(roe*100):.1f}%",
+                "ROE (자기자본이익률)": f"최근 12개월(TTM) 기준 = {(roe*100):.1f}%",
                 "부채비율 (Debt/Equity)": f"총부채 ÷ 자본총계 = {debt_to_equity:.1f}%",
                 "영업이익률 (Op. Margin)": f"영업이익 ÷ 총매출 = {(operating_margins*100):.1f}%"
             }
 
             data = {
-                "name": q_data.get("name", self.ticker),
-                "sector": p_data.get("sector", "Default"),
+                "name": info.get("shortName", self.ticker),
+                "sector": info.get("sector", "Default"),
                 "current_price": current_price,
-                "target_price": q_data.get("priceAvg200", 0), # 200일선 대체
-                "market_cap": q_data.get("marketCap", 0),
+                "target_price": info.get("targetMeanPrice", 0),
+                "market_cap": info.get("marketCap", 0),
                 "per": per,
-                "fwd_per": per, # 무료 티어 방어
+                "fwd_per": fwd_per,
                 "eps": eps,
                 "pbr": pbr,
                 "roe": roe,
                 "peg": peg,
-                "peg_source": "FMP API",
-                "revenue_growth": 0,
-                "earnings_growth": 0,
-                "ps_ratio": m_data.get("ptbRatioTTM", 0),
-                "ev_ebitda": m_data.get("enterpriseValueOverEBITDATTM", 0),
-                "52w_high": q_data.get("yearHigh", 0),
-                "52w_low": q_data.get("yearLow", 0),
+                "peg_source": "Yahoo Finance Info",
+                "revenue_growth": info.get("revenueGrowth", 0),
+                "earnings_growth": info.get("earningsGrowth", 0),
+                "ps_ratio": info.get("priceToSalesTrailing12Months", 0),
+                "ev_ebitda": info.get("enterpriseToEbitda", 0),
+                "52w_high": info.get("fiftyTwoWeekHigh", 0),
+                "52w_low": info.get("fiftyTwoWeekLow", 0),
                 "debt_to_equity": debt_to_equity,
-                "free_cashflow": free_cashflow,
+                "free_cashflow": info.get("freeCashflow", 0),
                 "op_margin": operating_margins,
                 "formulas": formulas 
             }
             return data
         except Exception as e:
-            print(f"Valuation API 에러: {e}")
+            print(f"❌ [Valuation] 야후 데이터 가공 중 에러: {e}")
             return None
 
     def calculate_valuation_score(self, data):
+        """[원본 복원] 점수 계산 및 투자 의견 산출 로직"""
         if not data or data['current_price'] == 0:
             return 0, "데이터 부족", []
 
         score = 50 
         reasons = []
 
+        # 1. PEG Ratio 평가
         peg = data['peg']
         if peg > 0:
             if peg < 0.8:
@@ -132,6 +150,7 @@ class ValuationAnalyzer:
                 score -= 10
                 reasons.append(f"⚠️ 고평가 구간 (PEG {peg:.2f})")
 
+        # 2. ROE 평가
         roe = data['roe']
         if roe > 0.20:
             score += 10
@@ -139,6 +158,7 @@ class ValuationAnalyzer:
         elif roe < 0.05:
             score -= 5
 
+        # 3. 부채비율 및 수익성 평가
         de_ratio = data['debt_to_equity']
         is_financial = "Financial" in data['sector']
         if not is_financial and de_ratio > 200:
@@ -150,6 +170,7 @@ class ValuationAnalyzer:
             score += 10
             reasons.append(f"💰 고마진 사업구조 (OPM {opm*100:.1f}%)")
 
+        # 4. 섹터 비교 평가
         sector_key = data.get('sector', 'Default')
         benchmark = self.benchmarks.get(sector_key, self.benchmarks.get('Default'))
         
@@ -174,6 +195,7 @@ class ValuationAnalyzer:
         return final_score, status, reasons
 
     def get_sector_comparison(self, data):
+        """섹터 벤치마크 데이터 반환"""
         if not data: return None
         sector_key = data.get('sector', 'Default')
         benchmark = self.benchmarks.get(sector_key, self.benchmarks.get('Default'))
