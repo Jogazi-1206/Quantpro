@@ -2,8 +2,38 @@ import yfinance as yf
 import pandas as pd
 import os
 import ssl
+import streamlit as st
 import requests
 from datetime import datetime, timedelta
+
+# ==========================================
+# 💡 [New] 야후 차단 방지용 초고속 캐싱 함수 (10분 유지)
+# ==========================================
+@st.cache_data(ttl=600) 
+def fetch_global_assets_cached():
+    assets_map = {
+        "Nasdaq": "^IXIC",
+        "Dow Jones": "^DJI",
+        "Russell 2000": "^RUT",
+        "Bitcoin": "BTC-USD",
+        "Gold": "GC=F",
+        "WTI Oil": "CL=F"
+    }
+    results = {}
+    for name, ticker in assets_map.items():
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period="5d")
+            if len(hist) >= 2:
+                curr = float(hist['Close'].iloc[-1])
+                prev = float(hist['Close'].iloc[-2])
+                pct = ((curr - prev) / prev) * 100
+                results[name] = {'price': curr, 'change': pct}
+        except Exception:
+            continue # 에러 나면 앱 멈추지 말고 그냥 패스!
+            
+    return results if results else None
+# ==========================================
 
 class DataLoader:
     def __init__(self):
@@ -195,14 +225,4 @@ class DataLoader:
         return data
 
     def get_dashboard_assets(self):
-        targets = {"Gold": "GC=F", "WTI Oil": "CL=F", "Bitcoin": "BTC-USD", "Nasdaq": "^IXIC", "Dow Jones": "^DJI", "Russell 2000": "^RUT"}
-        results = {}
-        try:
-            for name, ticker in targets.items():
-                stock = yf.Ticker(ticker)
-                last = stock.fast_info.last_price
-                prev = stock.fast_info.previous_close
-                if last and prev:
-                    results[name] = {"price": last, "change": ((last-prev)/prev)*100}
-        except: pass
-        return results
+        return fetch_global_assets_cached()
