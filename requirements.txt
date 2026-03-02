@@ -13,3 +13,5 @@ python-dotenv
 lxml
 google-genai
 plotly
+urllib3
+requests
